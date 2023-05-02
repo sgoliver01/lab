@@ -65,8 +65,7 @@
         }
         
         draw(gl) {
-            console.log("gl",gl);
-            console.log("this.tentPositionsBuffer",this.tentPositionsBuffer);
+            
             
             // Bind the position buffer so gl.drawArrays() draws the whole tent
             // these lines tell gl.drawArrays() how to get the data out of the buffer
@@ -88,8 +87,21 @@
     
     
     let tent;
+    let square;
     
     function init() {
+        
+        //initialize square
+        
+        const corner1 = [-10, 0, 10]
+        const corner2 = [-10,0, -10]
+        const corner3 = [10, 0, -10]
+        const corner4 = [10, 0, 10]
+        const squarePositionsData = [corner1[0], corner1[1], corner1[2], corner2[0], corner2[1], corner2[2], corner3[0], corner3[1], corner3[2], corner4[0], corner4[1], corner4[2]]
+        const squareColorsData = [0,1,0,0,1,0,0,1,0,0,1,0]
+
+        square = new TriangleMesh(squarePositionsData, squareColorsData);
+        
         
         // Step 1. initialize the canvas
         canvas = document.getElementById('demo');
@@ -139,6 +151,10 @@
         tent = new TriangleMesh(tentPositionsData, tentColorsData)
         tent.shipStandardAttributes(gl, program) 
         tent.tentCenter[2] = -2
+        
+        
+        square.shipStandardAttributes(gl, program) 
+        square.tentCenter[2] = -5
     
         // Step 5. call draw() repeatedly
         setInterval(draw, 0);
@@ -183,8 +199,8 @@
         shipTransforms(gl, program, perspectiveTransform, viewTransform, modelTransform);
     
         // Step 4. 
-        console.log("tent",tent);
         tent.draw(gl)
+        square.draw(gl)
         
     
         const elapsed = performance.now() - start;
