@@ -1,0 +1,295 @@
+<head>
+<script type="module">
+    /*
+    This demo shows how to go draw a spinning tent at >60 fps.
+    The trick is shipping the entire mesh once instead of shipping every triangle every frame.
+    */
+    
+    import { mat4, vec4, vec3 } from 'https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/+esm'
+    // can download as glMatrix.js for offline use if needed
+    
+    // global camera variables
+    let cameraX = 0;
+    let cameraY = 0;
+    let cameraZ = 0;
+    
+    // global drawing variables
+    let canvas;
+    let gl;
+    let program;
+    
+    class TriangleMesh {
+        constructor(positionsData, colorsData) {
+            // global tent variables
+            this.tentRotateY = 0;
+            this.tentCenter = new vec3.fromValues(0,0,0)
+            this.tentPositionsData = positionsData;
+            this.tentPositionsBuffer = null;
+            this.tentPositionsMemoryID = null;
+            this.tentColorsData = colorsData;
+            this.tentColorsBuffer = null;
+            this.tentColorsMemoryID = null;
+        }
+        
+        shipStandardAttributes(gl, program) {
+            this.tentPositionsBuffer = gl.createBuffer();
+            this.tentPositionsMemoryID = gl.getAttribLocation(program, 'aVertexPosition');
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.tentPositionsBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.tentPositionsData), gl.STATIC_DRAW);
+            gl.bindBuffer(gl.ARRAY_BUFFER, null); // this unbinds the buffer, prevents bugs
+
+            this.tentColorsBuffer = gl.createBuffer();
+            this.tentColorsMemoryID = gl.getAttribLocation(program, 'aVertexColor');
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.tentColorsBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.tentColorsData), gl.STATIC_DRAW);
+            gl.bindBuffer(gl.ARRAY_BUFFER, null); // this unbinds the buffer, prevents bugs
+        }
+        
+        getModelTransform() {
+            
+            const modelTransform = mat4.create();
+            mat4.translate(
+                modelTransform,
+                modelTransform,
+                vec3.fromValues(this.tentCenter[0], this.tentCenter[1], this.tentCenter[2])
+            );
+            mat4.rotateY(
+                modelTransform,
+                modelTransform,
+                this.tentRotateY,
+            );
+            
+            return modelTransform;
+            
+            
+        }
+        
+        draw(gl) {
+            console.log("gl",gl);
+            console.log("this.tentPositionsBuffer",this.tentPositionsBuffer);
+            
+            // Bind the position buffer so gl.drawArrays() draws the whole tent
+            // these lines tell gl.drawArrays() how to get the data out of the buffer
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.tentPositionsBuffer);
+            gl.vertexAttribPointer(this.tentPositionsMemoryID, 3, gl.FLOAT, false, 0, 0 );
+            gl.enableVertexAttribArray(this.tentPositionsMemoryID);
+            gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+            // and the colors too
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.tentColorsBuffer);
+            gl.vertexAttribPointer(this.tentColorsMemoryID, 3, gl.FLOAT, false, 0, 0 );
+            gl.enableVertexAttribArray(this.tentColorsMemoryID);
+            gl.bindBuffer(gl.ARRAY_BUFFER, null);
+            
+            gl.drawArrays(gl.TRIANGLES, 0, this.tentPositionsData.length/3);
+            
+        }
+    }
+    
+    
+    let tent;
+    
+    function init() {
+        
+        // Step 1. initialize the canvas
+        canvas = document.getElementById('demo');
+        canvas.width = 200;
+        canvas.height = 200;
+        canvas.style.width = "500px";
+    
+        // Step 2. initialize webgl context
+        gl = canvas.getContext('webgl2', {antialias: false} );
+        gl.viewport(0, 0, canvas.width, canvas.height);
+    
+        // Step 3. one-time compile the basic shader program
+        program = compileBasicProgram(gl);
+        gl.useProgram(program);
+    
+        // Step 4. one-time shipment of tent data to the GPU
+    
+        // Step 4a. Create the tent data
+        const nFaces = 12;
+        const tentPositionsData = []
+        const tentColorsData = []
+        for (let i=0; i < nFaces; i++) {
+            const thetaStep = 2*Math.PI/nFaces;
+            const theta = i*thetaStep;
+            const thetaNext = (i+1)*thetaStep;
+    
+            let [x0, y0, z0] = [Math.cos(theta), -1, Math.sin(theta)];
+            let [x1, y1, z1] = [0, 1, 0];
+            let [x2, y2, z2] = [Math.cos(thetaNext), -1, Math.sin(thetaNext)];
+            tentPositionsData.push(x0, y0, z0, x1, y1, z1, x2, y2, z2);
+    
+            // also push colors
+            // same color for all three vertices
+            if (i % 2 == 0) {
+                tentColorsData.push(1, 0, 0);
+                tentColorsData.push(1, 0, 0);
+                tentColorsData.push(1, 0, 0);
+            }
+            else {
+                tentColorsData.push(0, 0, 1);
+                tentColorsData.push(0, 0, 1);
+                tentColorsData.push(0, 0, 1);
+            }
+        }
+    
+        // Step 4b. Ship the data
+        tent = new TriangleMesh(tentPositionsData, tentColorsData)
+        tent.shipStandardAttributes(gl, program) 
+        tent.tentCenter[2] = -2
+    
+        // Step 5. call draw() repeatedly
+        setInterval(draw, 0);
+    }
+    
+    function draw() {
+        const start = performance.now();
+        document.getElementById('cameraPos').innerHTML = `Camera (${cameraX},${cameraY},${cameraZ})`;
+    
+        // clear canvas, reset buffers, enable depth test
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.DEPTH_TEST);
+    
+        // updates (rotating the tent slightly)
+        tent.tentRotateY += 0.01;
+    
+        // Now draw the tent:
+        // Step 1. Prepare perspective and view matrices
+        const perspectiveTransform = mat4.create();
+        mat4.perspective(
+            perspectiveTransform, // where to store the result
+            Math.PI/2, // "vertical field of view"
+            1, // "aspect ratio"
+            0.1, // distance to near plane
+            1000 // distance to far plane
+        );
+    
+        // use mat4.lookAt() for the view matrix
+        const viewTransform = mat4.create();
+        mat4.lookAt(
+            viewTransform, // where to store the result
+            vec3.fromValues(cameraX, cameraY, cameraZ), // camera position
+            vec3.fromValues(tent.tentCenter[0], tent.tentCenter[1], tent.tentCenter[2]), // camera target
+            vec3.fromValues(0, 1, 0), // up vector
+        );
+    
+        // Step 2. Prepare the model matrix
+        const modelTransform = tent.getModelTransform()
+    
+        // Step 3. Ship all the transforms
+        shipTransforms(gl, program, perspectiveTransform, viewTransform, modelTransform);
+    
+        // Step 4. 
+        console.log("tent",tent);
+        tent.draw(gl)
+        
+    
+        const elapsed = performance.now() - start;
+        console.log("Draw() took " + elapsed + "ms");
+    }
+    function compileBasicProgram(gl) {
+        const shaderProgram = gl.createProgram();
+        const vertexShaderCode = `#version 300 es
+        precision mediump float;
+        in vec3 aVertexPosition;
+        in vec3 aVertexColor;
+        uniform mat4 uPerspectiveTransform; 
+        uniform mat4 uViewTransform;
+        uniform mat4 uModelTransform;
+        out vec3 color;
+        void main(void) {
+            color = aVertexColor;
+            vec4 homogenized = vec4(aVertexPosition, 1.0);
+            gl_Position = uPerspectiveTransform * uViewTransform * uModelTransform * homogenized;
+        }
+        `;
+        const vertexShaderObject = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vertexShaderObject, vertexShaderCode);
+        gl.compileShader(vertexShaderObject);
+    
+        // good idea to check that it compiled successfully
+        if (!gl.getShaderParameter(vertexShaderObject, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(vertexShaderObject));
+        }
+    
+        // next, the fragment shader code
+        const fragmentShaderCode = `#version 300 es
+        precision mediump float;
+        out vec4 FragColor;
+        in vec3 color;
+        void main(void) {
+            FragColor = vec4(color.x, color.y, color.z, 1.0);
+        }
+        `;
+    
+        // send this fragment shader source code to the GPU
+        const fragmentShaderObject = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fragmentShaderObject, fragmentShaderCode);
+    
+        // tell GPU to compile it
+        gl.compileShader(fragmentShaderObject);
+    
+        // good idea to check that it compiled successfully
+        if (!gl.getShaderParameter(fragmentShaderObject, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(fragmentShaderObject));
+        }
+    
+        // attach each of the shaders to the shader program we created earlier
+        gl.attachShader(shaderProgram, vertexShaderObject);
+        gl.attachShader(shaderProgram, fragmentShaderObject);
+    
+        // tell GPU to "link" and "use" our program
+        gl.linkProgram(shaderProgram);
+        return shaderProgram;
+    }
+    function shipTransforms(gl, program, projectionTransform, viewTransform, modelTransform) {
+        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uPerspectiveTransform'), false, projectionTransform);
+        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uViewTransform'), false, viewTransform);
+        gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uModelTransform'), false, modelTransform);
+    }
+    
+    window.onload = init;
+    
+    window.onkeydown = function(e) {
+        if (e.key == 'w') {
+            // move the camera up
+            cameraY += .25;
+        }
+        else if (e.key == 's') {
+            // move the camera down
+            cameraY -= .25;
+        }
+        else if (e.key == 'a') {
+            // moving camera left
+            cameraX -= .25;
+        }
+        else if (e.key == 'd') {
+            // moving camera right
+            cameraX += .25;
+        }
+        else if (e.key == 'i') {
+            // moving camera forward
+            cameraZ -= .25;
+        }
+        else if (e.key == 'k') {
+            // moving camera backward
+            cameraZ += .25;
+        }
+    }
+    
+    
+
+    
+</script>
+</head>
+
+<body>
+    <p>w/a/s/d to move camera up/left/down/right</p>
+    <p>i/k move forward/back</p>
+    <p>camera always faces the tent</p>
+    <p id="cameraPos"></p>
+    <canvas style="image-rendering:pixelated; border:1px solid black" id="demo"></canvas>
+</body>
